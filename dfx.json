@@ -1,0 +1,38 @@
+{
+  "canisters": {
+    "stopwatch_backend": {
+      "build": "python -m kybra stopwatch_backend src/stopwatch_backend/src/main.py src/stopwatch_backend/stopwatch_backend.did",
+      "candid": "src/stopwatch_backend/stopwatch_backend.did",
+      "gzip": true,
+      "post_install": ".kybra/stopwatch_backend/post_install.sh",
+      "tech_stack": {
+        "cdk": {
+          "kybra": {}
+        },
+        "language": {
+          "python": {}
+        }
+      },
+      "type": "custom",
+      "wasm": ".kybra/stopwatch_backend/stopwatch_backend.wasm"
+    },
+    "stopwatch_frontend": {
+      "dependencies": [
+        "stopwatch_backend"
+      ],
+      "source": [
+        "src/stopwatch_frontend/dist"
+      ],
+      "type": "assets",
+      "workspace": "stopwatch_frontend"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
