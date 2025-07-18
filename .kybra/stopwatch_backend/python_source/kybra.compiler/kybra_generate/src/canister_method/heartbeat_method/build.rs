@@ -27,7 +27,10 @@ impl PyAst {
 
         Ok(
             if let Some(heartbeat_function_def) = heartbeat_function_def_option {
-                let (body, return_type) = (
+                let (guard_function_name, body, return_type) = (
+                    heartbeat_function_def
+                        .get_guard_function_name()
+                        .map_err(Error::into),
                     rust::generate(heartbeat_function_def).map_err(Error::into),
                     heartbeat_function_def.build_return_type(),
                 )
@@ -41,7 +44,10 @@ impl PyAst {
                     .into());
                 }
 
-                Some(HeartbeatMethod { body })
+                Some(HeartbeatMethod {
+                    body,
+                    guard_function_name,
+                })
             } else {
                 None
             },

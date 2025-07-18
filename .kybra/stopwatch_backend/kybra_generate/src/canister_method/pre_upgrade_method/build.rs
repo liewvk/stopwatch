@@ -30,7 +30,10 @@ impl PyAst {
 
         Ok(
             if let Some(pre_upgrade_function_def) = pre_upgrade_function_def_option {
-                let (body, return_type) = (
+                let (guard_function_name, body, return_type) = (
+                    pre_upgrade_function_def
+                        .get_guard_function_name()
+                        .map_err(Error::into),
                     rust::generate(pre_upgrade_function_def),
                     pre_upgrade_function_def.build_return_type(),
                 )
@@ -44,7 +47,10 @@ impl PyAst {
                     .into());
                 }
 
-                Some(PreUpgradeMethod { body })
+                Some(PreUpgradeMethod {
+                    body,
+                    guard_function_name,
+                })
             } else {
                 None
             },

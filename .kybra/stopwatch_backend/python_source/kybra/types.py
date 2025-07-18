@@ -6,6 +6,7 @@ class Args(TypedDict):
     flags: "Args_flags"
     canister_name: str
     entry_point: str
+    did_path: str
 
 
 class Args_flags(TypedDict):
@@ -25,7 +26,6 @@ class Paths(TypedDict):
     wasm: str
     custom_modules: str
     global_kybra_config_dir: str
-    global_kybra_version_dir: str
     global_kybra_rust_dir: str
     global_kybra_rust_bin_dir: str
     global_kybra_bin_dir: str

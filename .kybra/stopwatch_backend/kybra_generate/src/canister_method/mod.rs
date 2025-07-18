@@ -45,7 +45,7 @@ impl PyAst {
                         .iter()
                         .filter(|stmt_kind| {
                             SourceMapped::new(*stmt_kind, program.source_map.clone())
-                                .is_canister_method_type(method_type)
+                                .is_canister_method_type(method_type.clone())
                         })
                         .map(|stmt_kind| SourceMapped::new(stmt_kind, program.source_map.clone()))
                         .collect(),

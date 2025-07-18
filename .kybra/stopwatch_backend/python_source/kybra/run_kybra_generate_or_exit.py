@@ -76,7 +76,6 @@ def execute_generate_process(
             paths["py_file_names_file"],
             paths["py_entry_module_name"],
             paths["lib"],
-            kybra.__version__,
         ],
         capture_output=not verbose,
         env=cargo_env,

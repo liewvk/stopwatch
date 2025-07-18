@@ -15,6 +15,7 @@ use serde::{
 };
 use slotmap::Key as _KybraTraitSlotMapKey;
 use std::{convert::TryInto as _KybraTraitTryInto, str::FromStr as _KybraTraitFromStr};
+thread_local! { static PYTHON_STDLIB_STABLE_REF_CELL : std :: cell :: RefCell < ic_stable_structures :: cell :: Cell < Vec < u8 > , ic_stable_structures :: memory_manager :: VirtualMemory < ic_stable_structures :: DefaultMemoryImpl > > > = std :: cell :: RefCell :: new (ic_stable_structures :: cell :: Cell :: init (MEMORY_MANAGER_REF_CELL . with (| m | m . borrow () . get (ic_stable_structures :: memory_manager :: MemoryId :: new (253u8))) , vec ! []) . unwrap_or_trap ()) ; static CANISTER_INITIALIZED_REF_CELL : std :: cell :: RefCell < ic_stable_structures :: cell :: Cell < u8 , ic_stable_structures :: memory_manager :: VirtualMemory < ic_stable_structures :: DefaultMemoryImpl > > > = std :: cell :: RefCell :: new (ic_stable_structures :: cell :: Cell :: init (MEMORY_MANAGER_REF_CELL . with (| m | m . borrow () . get (ic_stable_structures :: memory_manager :: MemoryId :: new (254u8))) , 0) . unwrap_or_trap ()) ; static RANDOMNESS_STABLE_REF_CELL : std :: cell :: RefCell < ic_stable_structures :: cell :: Cell < Vec < u8 > , ic_stable_structures :: memory_manager :: VirtualMemory < ic_stable_structures :: DefaultMemoryImpl > > > = std :: cell :: RefCell :: new (ic_stable_structures :: cell :: Cell :: init (MEMORY_MANAGER_REF_CELL . with (| m | m . borrow () . get (ic_stable_structures :: memory_manager :: MemoryId :: new (252u8))) , vec ! []) . unwrap_or_trap ()) ; }
 trait ToCdkActTryIntoVmValueError {
     fn to_cdk_act_try_into_vm_value_error(
         self,
@@ -55,7 +56,6 @@ impl ToRustErrString for rustpython_vm::builtins::PyBaseExceptionRef {
         }
     }
 }
-const PYTHON_STDLIB: &[u8] = include_bytes!("../rust_python_stdlib/stdlib");
 static mut INTERPRETER_OPTION: Option<rustpython_vm::Interpreter> = None;
 static mut SCOPE_OPTION: Option<rustpython_vm::scope::Scope> = None;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -92,7 +92,7 @@ fn rng_seed() {
         let result: ic_cdk::api::call::CallResult<(Vec<u8>,)> =
             ic_cdk::api::management_canister::main::raw_rand().await;
         match result {
-            Ok(randomness) => ic_wasi_polyfill::init_seed(&randomness.0),
+            Ok(randomness) => unsafe { ic_wasi_polyfill::init_seed(&randomness.0) },
             Err(err) => panic!(err),
         };
     });
@@ -137,7 +137,7 @@ impl
 }
 impl
     CdkActTryFromVmValue<
-        candid::Empty,
+        ic_cdk::export::candid::Empty,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -145,13 +145,13 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Empty, rustpython_vm::builtins::PyBaseExceptionRef> {
+    ) -> Result<ic_cdk::export::candid::Empty, rustpython_vm::builtins::PyBaseExceptionRef> {
         Err(vm.new_type_error("value cannot be converted to Empty".to_string()))
     }
 }
 impl
     CdkActTryFromVmValue<
-        candid::Func,
+        ic_cdk::export::candid::Func,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -159,7 +159,7 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Func, rustpython_vm::builtins::PyBaseExceptionRef> {
+    ) -> Result<ic_cdk::export::candid::Func, rustpython_vm::builtins::PyBaseExceptionRef> {
         let tuple_self: rustpython_vm::builtins::PyTupleRef = self.try_into_value(vm)?;
         let principal = match tuple_self.get(0) {
             Some(principal) => principal,
@@ -176,7 +176,7 @@ impl
                     .new_type_error("could not convert value to Func, missing method".to_string()))
             }
         };
-        Ok(candid::Func {
+        Ok(ic_cdk::export::candid::Func {
             principal: principal.clone().try_from_vm_value(vm)?,
             method: method.clone().try_from_vm_value(vm)?,
         })
@@ -184,7 +184,7 @@ impl
 }
 impl
     CdkActTryFromVmValue<
-        candid::Principal,
+        ic_cdk::export::Principal,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -192,11 +192,11 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Principal, rustpython_vm::builtins::PyBaseExceptionRef> {
+    ) -> Result<ic_cdk::export::Principal, rustpython_vm::builtins::PyBaseExceptionRef> {
         let to_str = self.get_attr("to_str", vm)?;
         let result = to_str.call((), vm)?;
         let result_string: String = result.try_into_value(vm)?;
-        match candid::Principal::from_text(result_string) {
+        match ic_cdk::export::Principal::from_text(result_string) {
             Ok(principal) => Ok(principal),
             Err(err) => Err(vm.new_type_error(format!(
                 "could not convert value to Principal: {}",
@@ -207,7 +207,7 @@ impl
 }
 impl
     CdkActTryFromVmValue<
-        candid::Reserved,
+        ic_cdk::export::candid::Reserved,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -215,8 +215,8 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Reserved, rustpython_vm::builtins::PyBaseExceptionRef> {
-        Ok(candid::Reserved)
+    ) -> Result<ic_cdk::export::candid::Reserved, rustpython_vm::builtins::PyBaseExceptionRef> {
+        Ok(ic_cdk::export::candid::Reserved)
     }
 }
 impl
@@ -420,7 +420,7 @@ impl
 }
 impl
     CdkActTryFromVmValue<
-        candid::Int,
+        ic_cdk::export::candid::Int,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -428,10 +428,10 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Int, rustpython_vm::builtins::PyBaseExceptionRef> {
+    ) -> Result<ic_cdk::export::candid::Int, rustpython_vm::builtins::PyBaseExceptionRef> {
         let int_result: Result<rustpython_vm::builtins::PyIntRef, _> = self.try_into_value(vm);
         match int_result {
-            Ok(int) => Ok(candid::Int(int.as_bigint().clone())),
+            Ok(int) => Ok(ic_cdk::export::candid::Int(int.as_bigint().clone())),
             Err(_) => Err(vm.new_type_error("PyObjectRef is not a PyIntRef".to_string())),
         }
     }
@@ -508,7 +508,7 @@ impl
 }
 impl
     CdkActTryFromVmValue<
-        candid::Nat,
+        ic_cdk::export::candid::Nat,
         rustpython_vm::builtins::PyBaseExceptionRef,
         &rustpython::vm::VirtualMachine,
     > for rustpython::vm::PyObjectRef
@@ -516,9 +516,9 @@ impl
     fn try_from_vm_value(
         self,
         vm: &rustpython::vm::VirtualMachine,
-    ) -> Result<candid::Nat, rustpython_vm::builtins::PyBaseExceptionRef> {
+    ) -> Result<ic_cdk::export::candid::Nat, rustpython_vm::builtins::PyBaseExceptionRef> {
         let int: rustpython_vm::builtins::PyIntRef = self.try_into_value(vm)?;
-        match candid::Nat::from_str(&int.as_bigint().to_string()) {
+        match ic_cdk::export::candid::Nat::from_str(&int.as_bigint().to_string()) {
             Ok(nat) => Ok(nat),
             Err(_) => Err(vm.new_type_error("Could not convert value to nat".to_string())),
         }
@@ -809,13 +809,13 @@ impl<T> KybraTryFromVec for Vec<T> {}
 impl<T> KybraTryFromVec for Box<T> {}
 impl KybraTryFromVec for () {}
 impl<T> KybraTryFromVec for Option<T> {}
-impl KybraTryFromVec for candid::Empty {}
-impl KybraTryFromVec for candid::Reserved {}
-impl KybraTryFromVec for candid::Func {}
-impl KybraTryFromVec for candid::Principal {}
+impl KybraTryFromVec for ic_cdk::export::candid::Empty {}
+impl KybraTryFromVec for ic_cdk::export::candid::Reserved {}
+impl KybraTryFromVec for ic_cdk::export::candid::Func {}
+impl KybraTryFromVec for ic_cdk::export::Principal {}
 impl KybraTryFromVec for ic_cdk_timers::TimerId {}
-impl KybraTryFromVec for candid::Int {}
-impl KybraTryFromVec for candid::Nat {}
+impl KybraTryFromVec for ic_cdk::export::candid::Int {}
+impl KybraTryFromVec for ic_cdk::export::candid::Nat {}
 impl KybraTryFromVec for _CdkFloat32 {}
 impl KybraTryFromVec for _CdkFloat64 {}
 impl<T>
@@ -879,7 +879,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Empty
+    for ic_cdk::export::candid::Empty
 {
     fn try_into_vm_value(
         self,
@@ -891,7 +891,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Func
+    for ic_cdk::export::candid::Func
 {
     fn try_into_vm_value(
         self,
@@ -903,7 +903,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Principal
+    for ic_cdk::export::Principal
 {
     fn try_into_vm_value(
         self,
@@ -946,7 +946,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Reserved
+    for ic_cdk::export::candid::Reserved
 {
     fn try_into_vm_value(
         self,
@@ -1130,7 +1130,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Int
+    for ic_cdk::export::candid::Int
 {
     fn try_into_vm_value(
         self,
@@ -1180,7 +1180,7 @@ impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObj
     }
 }
 impl CdkActTryIntoVmValue<&rustpython::vm::VirtualMachine, rustpython::vm::PyObjectRef>
-    for candid::Nat
+    for ic_cdk::export::candid::Nat
 {
     fn try_into_vm_value(
         self,
@@ -1241,23 +1241,23 @@ trait KybraTryIntoVec {}
 impl KybraTryIntoVec for () {}
 impl KybraTryIntoVec for bool {}
 impl KybraTryIntoVec for String {}
-impl KybraTryIntoVec for candid::Empty {}
-impl KybraTryIntoVec for candid::Reserved {}
-impl KybraTryIntoVec for candid::Func {}
-impl KybraTryIntoVec for candid::Principal {}
+impl KybraTryIntoVec for ic_cdk::export::candid::Empty {}
+impl KybraTryIntoVec for ic_cdk::export::candid::Reserved {}
+impl KybraTryIntoVec for ic_cdk::export::candid::Func {}
+impl KybraTryIntoVec for ic_cdk::export::Principal {}
 impl KybraTryIntoVec for ic_cdk_timers::TimerId {}
 impl KybraTryIntoVec for ic_cdk::api::call::RejectionCode {}
 impl KybraTryIntoVec for f64 {}
 impl KybraTryIntoVec for f32 {}
 impl KybraTryIntoVec for _CdkFloat64 {}
 impl KybraTryIntoVec for _CdkFloat32 {}
-impl KybraTryIntoVec for candid::Int {}
+impl KybraTryIntoVec for ic_cdk::export::candid::Int {}
 impl KybraTryIntoVec for i128 {}
 impl KybraTryIntoVec for i64 {}
 impl KybraTryIntoVec for i32 {}
 impl KybraTryIntoVec for i16 {}
 impl KybraTryIntoVec for i8 {}
-impl KybraTryIntoVec for candid::Nat {}
+impl KybraTryIntoVec for ic_cdk::export::candid::Nat {}
 impl KybraTryIntoVec for u128 {}
 impl KybraTryIntoVec for u64 {}
 impl KybraTryIntoVec for usize {}
@@ -1374,7 +1374,7 @@ async fn async_result_handler_call(
     py_object_ref: &rustpython_vm::PyObjectRef,
     args: &Vec<rustpython_vm::PyObjectRef>,
 ) -> rustpython_vm::PyResult {
-    let canister_id_principal: candid::Principal = args[0].clone().try_from_vm_value(vm)?;
+    let canister_id_principal: ic_cdk::export::Principal = args[0].clone().try_from_vm_value(vm)?;
     let qual_name: String = args[1].clone().try_from_vm_value(vm)?;
     let cross_canister_call_function_name = format!("call_{}", qual_name.replace(".", "_"));
     let call_result_instance = match &cross_canister_call_function_name[..] {
@@ -1392,7 +1392,7 @@ async fn async_result_handler_call_with_payment(
     py_object_ref: &rustpython_vm::PyObjectRef,
     args: &Vec<rustpython_vm::PyObjectRef>,
 ) -> rustpython_vm::PyResult {
-    let canister_id_principal: candid::Principal = args[0].clone().try_from_vm_value(vm)?;
+    let canister_id_principal: ic_cdk::export::Principal = args[0].clone().try_from_vm_value(vm)?;
     let qual_name: String = args[1].clone().try_from_vm_value(vm)?;
     let cross_canister_call_with_payment_function_name =
         format!("call_with_payment_{}", qual_name.replace(".", "_"));
@@ -1411,7 +1411,7 @@ async fn async_result_handler_call_with_payment128(
     py_object_ref: &rustpython_vm::PyObjectRef,
     args: &Vec<rustpython_vm::PyObjectRef>,
 ) -> rustpython_vm::PyResult {
-    let canister_id_principal: candid::Principal = args[0].clone().try_from_vm_value(vm)?;
+    let canister_id_principal: ic_cdk::export::Principal = args[0].clone().try_from_vm_value(vm)?;
     let qual_name: String = args[1].clone().try_from_vm_value(vm)?;
     let cross_canister_call_with_payment128_function_name =
         format!("call_with_payment128_{}", qual_name.replace(".", "_"));
@@ -1430,7 +1430,7 @@ async fn async_result_handler_call_raw(
     py_object_ref: &rustpython_vm::PyObjectRef,
     args: &Vec<rustpython_vm::PyObjectRef>,
 ) -> rustpython_vm::PyResult {
-    let canister_id_principal: candid::Principal = args[0].clone().try_from_vm_value(vm)?;
+    let canister_id_principal: ic_cdk::export::Principal = args[0].clone().try_from_vm_value(vm)?;
     let method_string: String = args[1].clone().try_from_vm_value(vm)?;
     let args_raw_vec: Vec<u8> = args[2].clone().try_from_vm_value(vm)?;
     let payment: u64 = args[3].clone().try_from_vm_value(vm)?;
@@ -1453,7 +1453,7 @@ async fn async_result_handler_call_raw128(
     py_object_ref: &rustpython_vm::PyObjectRef,
     args: &Vec<rustpython_vm::PyObjectRef>,
 ) -> rustpython_vm::PyResult {
-    let canister_id_principal: candid::Principal = args[0].clone().try_from_vm_value(vm)?;
+    let canister_id_principal: ic_cdk::export::Principal = args[0].clone().try_from_vm_value(vm)?;
     let method_string: String = args[1].clone().try_from_vm_value(vm)?;
     let args_raw_vec: Vec<u8> = args[2].clone().try_from_vm_value(vm)?;
     let payment: u128 = args[3].clone().try_from_vm_value(vm)?;
@@ -1558,11 +1558,16 @@ where
             .map_err(|py_base_exception| py_base_exception.to_rust_err_string(vm))
     })
 }
-pub fn guard_against_non_controllers() -> Result<(), String> {
-    if ic_cdk::api::is_controller(&ic_cdk::api::caller()) {
-        Ok(())
+#[ic_cdk_macros::query]
+fn __get_candid_interface_tmp_hack() -> String {
+    __export_service()
+}
+#[ic_cdk_macros::query]
+pub fn does_interpreter_exist() -> bool {
+    if unsafe { INTERPRETER_OPTION.as_mut() }.is_none() {
+        false
     } else {
-        Err("Not Authorized: only controllers of this canister may call this method".to_string())
+        true
     }
 }
 #[rustpython_derive::pyclass(module = false, name = "ic")]
@@ -1615,7 +1620,8 @@ impl Ic {
         vm: &rustpython_vm::VirtualMachine,
     ) -> rustpython_vm::PyResult {
         let candid_string: String = candid_string_py_object_ref.try_from_vm_value(vm)?;
-        let candid_args = candid_parser::parse_idl_args(&candid_string)
+        let candid_args: candid::IDLArgs = candid_string
+            .parse::<candid::IDLArgs>()
             .map_err(|candid_error| CandidError::new(vm, candid_error.to_string()))?;
         let candid_encoded: Vec<u8> = candid_args
             .to_bytes()
@@ -1726,7 +1732,7 @@ impl Ic {
         payment_py_object_ref: rustpython_vm::PyObjectRef,
         vm: &rustpython_vm::VirtualMachine,
     ) -> rustpython_vm::PyResult {
-        let canister_id_principal: candid::Principal =
+        let canister_id_principal: ic_cdk::export::Principal =
             canister_id_py_object_ref.try_from_vm_value(vm)?;
         let method_string: String = method_py_object_ref.try_from_vm_value(vm)?;
         let args_raw_vec: Vec<u8> = args_raw_py_object_ref.try_from_vm_value(vm)?;
@@ -1759,7 +1765,7 @@ impl Ic {
         vm: &rustpython_vm::VirtualMachine,
     ) -> rustpython_vm::PyResult {
         let param_string: String = param_py_object_ref.try_from_vm_value(vm)?;
-        ic_cdk::println!("{}", param_string)
+        ic_cdk::println!("{:#?}", param_string)
             .try_into_vm_value(vm)
             .map_err(|vmc_err| vm.new_type_error(vmc_err.0))
     }
@@ -2238,112 +2244,62 @@ impl CandidError {
         KybraError::subtype(vm, "CandidError", message)
     }
 }
-#[ic_cdk_macros::init]
+#[ic_cdk_macros::init()]
 #[candid::candid_method(init)]
-fn init() {
-    ic_wasi_polyfill::init(&[], &[]);
-    let interpreter = rustpython_vm::Interpreter::with_init(Default::default(), |vm| {
-        vm.add_native_modules(rustpython_stdlib::get_module_inits());
-        vm.add_frozen(rustpython_vm::py_freeze!(dir = "python_source"));
-        vm.add_frozen(rustpython_compiler_core::frozen_lib::FrozenLib::from_ref(
-            PYTHON_STDLIB,
-        ));
-    });
-    let scope = interpreter.enter(|vm| vm.new_scope_with_builtins());
-    let vm = &interpreter.vm;
-    Ic::make_class(&vm.ctx);
-    vm.builtins
-        .set_attr("_kybra_ic", vm.new_pyobj(Ic {}), vm)
-        .unwrap_or_trap(vm);
-    vm.run_code_string(
-        scope.clone(),
-        &format!("from {} import *", "main"),
-        "".to_owned(),
-    )
-    .unwrap_or_trap(vm);
-    unsafe {
-        INTERPRETER_OPTION = Some(interpreter);
-        SCOPE_OPTION = Some(scope);
-    };
-    {
-        let interpreter = unsafe { INTERPRETER_OPTION.as_mut() }
-            .unwrap_or_trap("SystemError: missing python interpreter");
-        let vm = &interpreter.vm;
-    }
-    ic_cdk_timers::set_timer(std::time::Duration::from_secs(0), || {
-        ic_cdk::spawn(async move {
-            let result: ic_cdk::api::call::CallResult<(Vec<u8>,)> =
-                ic_cdk::api::management_canister::main::raw_rand().await;
-            match result {
-                Ok((randomness,)) => {
-                    let interpreter = unsafe { INTERPRETER_OPTION.as_mut() }
-                        .ok_or_else(|| "SystemError: missing python interpreter".to_string())
-                        .unwrap();
-                    let scope = unsafe { SCOPE_OPTION.as_mut() }
-                        .ok_or_else(|| "SystemError: missing python scope".to_string())
-                        .unwrap();
-                    interpreter.enter(|vm| {
-                        let random_module = vm.import("random", None, 0).unwrap();
-                        let seed_fn = random_module.get_attr("seed", vm).unwrap();
-                        seed_fn.call((vm.ctx.new_bytes(randomness),), vm).unwrap();
-                    });
-                }
-                Err(err) => panic!(err),
-            };
-        });
-    });
-}
-#[ic_cdk_macros::post_upgrade]
+fn init() {}
+#[ic_cdk_macros::post_upgrade()]
 fn post_upgrade() {
-    ic_wasi_polyfill::init(&[], &[]);
-    let interpreter = rustpython_vm::Interpreter::with_init(Default::default(), |vm| {
-        vm.add_native_modules(rustpython_stdlib::get_module_inits());
-        vm.add_frozen(rustpython_vm::py_freeze!(dir = "python_source"));
-        vm.add_frozen(rustpython_compiler_core::frozen_lib::FrozenLib::from_ref(
-            PYTHON_STDLIB,
-        ));
-    });
-    let scope = interpreter.enter(|vm| vm.new_scope_with_builtins());
-    let vm = &interpreter.vm;
-    Ic::make_class(&vm.ctx);
-    vm.builtins
-        .set_attr("_kybra_ic", vm.new_pyobj(Ic {}), vm)
+    ic_cdk_timers::set_timer(std::time::Duration::from_secs(0), move || {
+        let randomness = RANDOMNESS_STABLE_REF_CELL
+            .with(|randomness_stable_ref_cell| randomness_stable_ref_cell.borrow().get().clone());
+        if randomness.len() == 0 {
+            ic_cdk::trap("Post Upgrade Error: randomness cannot have length 0");
+        }
+        unsafe {
+            ic_wasi_polyfill::init(&randomness);
+        };
+        let interpreter = rustpython_vm::Interpreter::with_init(Default::default(), |vm| {
+            vm.add_native_modules(rustpython_stdlib::get_module_inits());
+            vm.add_frozen(rustpython_vm::py_freeze!(dir = "python_source"));
+            PYTHON_STDLIB_STABLE_REF_CELL.with(|python_stdlib_stable_ref_cell| {
+                let mut python_stdlib_stable_ref = python_stdlib_stable_ref_cell.borrow();
+                let python_stdlib_bytes_reference: &'static [u8] =
+                    python_stdlib_stable_ref.get().clone().leak();
+                vm.add_frozen(rustpython_compiler_core::frozen_lib::FrozenLib::from_ref(
+                    python_stdlib_bytes_reference,
+                ));
+            });
+        });
+        let scope = interpreter.enter(|vm| vm.new_scope_with_builtins());
+        let vm = &interpreter.vm;
+        Ic::make_class(&vm.ctx);
+        vm.builtins
+            .set_attr("_kybra_ic", vm.new_pyobj(Ic {}), vm)
+            .unwrap_or_trap(vm);
+        vm.run_code_string(
+            scope.clone(),
+            &format!("from {} import *", "main"),
+            "".to_owned(),
+        )
         .unwrap_or_trap(vm);
-    vm.run_code_string(
-        scope.clone(),
-        &format!("from {} import *", "main"),
-        "".to_owned(),
-    )
-    .unwrap_or_trap(vm);
-    unsafe {
-        INTERPRETER_OPTION = Some(interpreter);
-        SCOPE_OPTION = Some(scope);
-    };
-    {
+        unsafe {
+            INTERPRETER_OPTION = Some(interpreter);
+            SCOPE_OPTION = Some(scope);
+        };
         let interpreter = unsafe { INTERPRETER_OPTION.as_mut() }
             .unwrap_or_trap("SystemError: missing python interpreter");
         let vm = &interpreter.vm;
-    }
-    ic_cdk_timers::set_timer(std::time::Duration::from_secs(0), || {
-        ic_cdk::spawn(async move {
-            let result: ic_cdk::api::call::CallResult<(Vec<u8>,)> =
-                ic_cdk::api::management_canister::main::raw_rand().await;
-            match result {
-                Ok((randomness,)) => {
-                    let interpreter = unsafe { INTERPRETER_OPTION.as_mut() }
-                        .ok_or_else(|| "SystemError: missing python interpreter".to_string())
-                        .unwrap();
-                    let scope = unsafe { SCOPE_OPTION.as_mut() }
-                        .ok_or_else(|| "SystemError: missing python scope".to_string())
-                        .unwrap();
-                    interpreter.enter(|vm| {
-                        let random_module = vm.import("random", None, 0).unwrap();
-                        let seed_fn = random_module.get_attr("seed", vm).unwrap();
-                        seed_fn.call((vm.ctx.new_bytes(randomness),), vm).unwrap();
-                    });
-                }
-                Err(err) => panic!(err),
-            };
+        if CANISTER_INITIALIZED_REF_CELL
+            .with(|canister_initialized_ref_cell| *canister_initialized_ref_cell.borrow().get())
+            == 0
+        {
+        } else {
+        }
+        CANISTER_INITIALIZED_REF_CELL.with(|canister_initialized_ref_cell| {
+            canister_initialized_ref_cell
+                .borrow_mut()
+                .set(1)
+                .unwrap_or_trap()
         });
     });
 }

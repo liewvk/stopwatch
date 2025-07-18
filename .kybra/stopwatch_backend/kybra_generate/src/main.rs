@@ -23,7 +23,7 @@ fn main() {
     });
     let py_file_names: Vec<&str> = py_file_names_string.split(",").collect();
 
-    let lib_file = generate_canister(&py_file_names, py_entry_module_name)
+    let lib_file = generate_canister(&py_file_names, &py_entry_module_name)
         .unwrap_or_else(|errors| {
             eprintln!("Canister compilation failed:");
             for error in errors {

@@ -12,7 +12,7 @@ from typing import Any, Callable
 import kybra
 from kybra.build_wasm_binary_or_exit import build_wasm_binary_or_exit
 from kybra.cargotoml import generate_cargo_toml, generate_cargo_lock
-from kybra.colors import red, green, dim
+from kybra.colors import red, yellow, green, dim
 from kybra.run_kybra_generate_or_exit import run_kybra_generate_or_exit
 from kybra.timed import timed, timed_inline
 from kybra.types import Args, Paths
@@ -20,21 +20,10 @@ from kybra.types import Args, Paths
 
 @timed
 def main():
-    # TODO this way of installing the extension is just temporary
-    # TODO we should use the official dfx extension install command
-    # TODO are the dfx extensions repository once those mature
-    if sys.argv[1] == "install-dfx-extension":
-        subprocess.run(
-            ["./install.sh"],
-            cwd=os.path.join(
-                os.path.dirname(kybra.__file__), "compiler", "dfx_extension"
-            ),
-        )
-        return
-
     args = parse_args_or_exit(sys.argv)
     paths = create_paths(args)
-    is_verbose = args["flags"]["verbose"] or os.environ.get("KYBRA_VERBOSE") == "true"
+    is_verbose = args["flags"]["verbose"]
+    is_initial_compile = detect_initial_compile(paths["global_kybra_target_dir"])
 
     subprocess.run(
         [
@@ -51,12 +40,26 @@ def main():
 
     print(f"\nBuilding canister {green(canister_name)}{verbose_mode_qualifier}\n")
 
+    if is_initial_compile:
+        print(
+            yellow(
+                "Initial build takes a few minutes. Don't panic. Subsequent builds will be faster.\n"
+            )
+        )
+
     # Copy all of the Rust project structure from the pip package to an area designed for Rust compiling
     if os.path.exists(paths["canister"]):
         shutil.rmtree(paths["canister"])
     shutil.copytree(paths["compiler"], paths["canister"], dirs_exist_ok=True)
     create_file(f"{paths['canister']}/Cargo.toml", generate_cargo_toml(canister_name))
     create_file(f"{paths['canister']}/Cargo.lock", generate_cargo_lock())
+    create_file(
+        f"{paths['canister']}/post_install.sh",
+        generate_post_install_script(
+            canister_name, kybra.__rust_version__, is_verbose, paths["did"]
+        ),
+    )
+    os.system(f"chmod +x {paths['canister']}/post_install.sh")
 
     # Add CARGO_TARGET_DIR to env for all cargo commands
     cargo_env = {
@@ -70,7 +73,7 @@ def main():
         os.makedirs(paths["global_kybra_bin_dir"])
 
     compile_python_or_exit(
-        paths, cargo_env, verbose=is_verbose, label="[1/2] 🔨 Compiling Python..."
+        paths, cargo_env, verbose=is_verbose, label="[1/3] 🔨 Compiling Python..."
     )
 
     build_wasm_binary_or_exit(
@@ -78,10 +81,45 @@ def main():
         canister_name,
         cargo_env,
         verbose=is_verbose,
-        label=f"[2/2] 🚧 Building Wasm binary...",
+        label=f"[2/3] 🚧 Building Wasm binary...{show_empathy(is_initial_compile)}",
+    )
+
+    optimize_wasm_binary_or_exit(
+        paths,
+        canister_name,
+        cargo_env,
+        verbose=is_verbose,
+        label=f"[3/3] 🚀 Optimizing Wasm binary...{show_empathy(is_initial_compile)}",
     )
 
     print(f"\n🎉 Built canister {green(canister_name)} at {dim(paths['wasm'])}")
+
+
+def generate_post_install_script(
+    canister_name: str, rust_version: str, is_verbose: bool, candid_path: str
+) -> str:
+    main_command = f"KYBRA_VERSION={kybra.__version__} $global_kybra_cargo_bin run --manifest-path=.kybra/{canister_name}/kybra_post_install/Cargo.toml {canister_name} {candid_path}"
+    main_command_not_verbose = f'exec 3>&1; output=$({main_command} 2>&1 1>&3 3>&-); exit_code=$?; exec 3>&-; if [ $exit_code -ne 0 ]; then echo "$output"; exit $exit_code; fi'
+
+    return f"""#!/bin/bash
+
+rust_version="{rust_version}"
+
+global_kybra_config_dir=~/.config/kybra
+global_kybra_rust_dir="$global_kybra_config_dir"/rust/"$rust_version"
+global_kybra_rust_bin_dir="$global_kybra_rust_dir"/bin
+global_kybra_logs_dir="$global_kybra_rust_dir"/logs
+global_kybra_cargo_bin="$global_kybra_rust_bin_dir"/cargo
+global_kybra_rustup_bin="$global_kybra_rust_bin_dir"/rustup
+
+export CARGO_TARGET_DIR="$global_kybra_config_dir"/rust/target
+export CARGO_HOME="$global_kybra_rust_dir"
+export RUSTUP_HOME="$global_kybra_rust_dir"
+
+echo "\nPreparing canister binaries for upload...\n"
+
+{main_command if is_verbose else main_command_not_verbose}
+    """
 
 
 def parse_args_or_exit(args: list[str]) -> Args:
@@ -92,12 +130,12 @@ def parse_args_or_exit(args: list[str]) -> Args:
 
     if len(args) == 0:
         print(f"\nkybra {kybra.__version__}")
-        print("\nUsage: kybra [-v|--verbose] <canister_name> <entry_point>")
+        print("\nUsage: kybra [-v|--verbose] <canister_name> <entry_point> <did_path>")
         sys.exit(0)
 
-    if len(args) != 2:
+    if len(args) != 3:
         print(red("\n💣 Kybra error: wrong number of arguments\n"))
-        print("Usage: kybra [-v|--verbose] <canister_name> <entry_point>")
+        print("Usage: kybra [-v|--verbose] <canister_name> <entry_point> <did_path>")
         print("\n💀 Build failed!")
         sys.exit(1)
 
@@ -106,6 +144,7 @@ def parse_args_or_exit(args: list[str]) -> Args:
         "flags": {"verbose": "--verbose" in flags or "-v" in flags},
         "canister_name": args[0],
         "entry_point": args[1],
+        "did_path": args[2],
     }
 
 
@@ -128,11 +167,8 @@ def create_paths(args: Args) -> Paths:
 
     py_file_names_file_path = f"{canister_path}/py_file_names.csv"
 
-    # This is the path to the developer's Candid file as resolved by dfx
-    did_path = os.environ.get("CANISTER_CANDID_PATH")
-
-    if did_path is None:
-        raise Exception("Kybra: CANISTER_CANDID_PATH is not defined")
+    # This is the path to the developer's Candid file passed into python -m kybra from the dfx.json build command
+    did_path = args["did_path"]
 
     # This is the path to the Kybra compiler Rust code delivered with the Python package
     compiler_path = os.path.dirname(kybra.__file__) + "/compiler"
@@ -151,7 +187,6 @@ def create_paths(args: Args) -> Paths:
 
     home_dir = os.path.expanduser("~")
     global_kybra_config_dir = f"{home_dir}/.config/kybra"
-    global_kybra_version_dir = f"{global_kybra_config_dir}/{kybra.__version__}"
     global_kybra_rust_dir = f"{global_kybra_config_dir}/rust/{kybra.__rust_version__}"
     global_kybra_rust_bin_dir = f"{global_kybra_rust_dir}/bin"
     global_kybra_target_dir = f"{global_kybra_config_dir}/rust/target"
@@ -170,12 +205,15 @@ def create_paths(args: Args) -> Paths:
         "wasm": wasm_path,
         "custom_modules": custom_modules_path,
         "global_kybra_config_dir": global_kybra_config_dir,
-        "global_kybra_version_dir": global_kybra_version_dir,
         "global_kybra_rust_dir": global_kybra_rust_dir,
         "global_kybra_rust_bin_dir": global_kybra_rust_bin_dir,
         "global_kybra_target_dir": global_kybra_target_dir,
         "global_kybra_bin_dir": global_kybra_bin_dir,
     }
+
+
+def detect_initial_compile(global_kybra_target_dir: str) -> bool:
+    return not os.path.exists(global_kybra_target_dir)
 
 
 @timed_inline
@@ -185,6 +223,10 @@ def compile_python_or_exit(
     bundle_python_code(paths)
     run_kybra_generate_or_exit(paths, cargo_env, verbose)
     run_rustfmt_or_exit(paths, cargo_env, verbose)
+
+
+def encourage_patience(is_initial_compile: bool) -> str:
+    return " (be patient, this will take a while)" if is_initial_compile else ""
 
 
 def bundle_python_code(paths: Paths):
@@ -305,6 +347,92 @@ def run_rustfmt_or_exit(paths: Paths, cargo_env: dict[str, str], verbose: bool =
         )
         print("💀 Build failed")
         sys.exit(1)
+
+
+@timed_inline
+def optimize_wasm_binary_or_exit(
+    paths: Paths, canister_name: str, cargo_env: dict[str, str], verbose: bool = False
+):
+    optimization_result = subprocess.run(
+        [
+            f"{paths['global_kybra_rust_bin_dir']}/ic-wasm",
+            f"{paths['canister']}/{canister_name}_app.wasm",
+            "-o",
+            f"{paths['canister']}/{canister_name}_app.wasm",
+            "shrink",
+        ],
+        capture_output=not verbose,
+    )
+
+    if optimization_result.returncode != 0:
+        print(red("\n💣 Kybra error: optimizing generated Wasm"))
+        print(optimization_result.stderr.decode("utf-8"))
+        print("💀 Build failed")
+        sys.exit(1)
+
+    add_metadata_to_wasm_or_exit(paths, canister_name, verbose=verbose)
+
+    os.system(f"gzip -9 -f -k {paths['canister']}/{canister_name}_app.wasm")
+
+
+def add_metadata_to_wasm_or_exit(
+    paths: Paths, canister_name: str, verbose: bool = False
+):
+    # TODO removing this until we solve the Candid issue: https://forum.dfinity.org/t/automatically-generate-candid-from-rust-sources/5924/34
+    # TODO our current solution is to grab the Candid in post_install because of issues with Wasmer
+    # TODO Unfortunately this means that on first deploy the candid:service metadata is incorrect
+    # TODO thus we are relying on __get_candid_interface_tmp_hack for the time being
+    # add_candid_to_wasm_result = subprocess.run(
+    #     [
+    #         f"{paths['global_kybra_rust_bin_dir']}/ic-wasm",
+    #         f"{paths['canister']}/{canister_name}_app.wasm",
+    #         "-o",
+    #         f"{paths['canister']}/{canister_name}_app.wasm",
+    #         "metadata",
+    #         "candid:service",
+    #         "-f",
+    #         paths["did"],
+    #         "-v",
+    #         "public",
+    #     ],
+    #     capture_output=not verbose,
+    # )
+
+    # if add_candid_to_wasm_result.returncode != 0:
+    #     print(red("\n💣 Kybra error: adding candid to Wasm"))
+    #     print(add_candid_to_wasm_result.stderr.decode("utf-8"))
+    #     print("💀 Build failed")
+    #     sys.exit(1)
+
+    add_cdk_info_to_wasm_result = subprocess.run(
+        [
+            f"{paths['global_kybra_rust_bin_dir']}/ic-wasm",
+            f"{paths['canister']}/{canister_name}_app.wasm",
+            "-o",
+            f"{paths['canister']}/{canister_name}_app.wasm",
+            "metadata",
+            "cdk",
+            "-d",
+            f"kybra {kybra.__version__}",
+            "-v",
+            "public",
+        ],
+        capture_output=not verbose,
+    )
+
+    if add_cdk_info_to_wasm_result.returncode != 0:
+        print(red("\n💣 Kybra error: adding cdk name/version to Wasm"))
+        print(add_cdk_info_to_wasm_result.stderr.decode("utf-8"))
+        print("💀 Build failed")
+        sys.exit(1)
+
+
+def show_empathy(is_initial_compile: bool) -> str:
+    return (
+        " (❤ hang in there, this will be faster next time)"
+        if is_initial_compile
+        else ""
+    )
 
 
 def create_file(file_path: str, contents: str):

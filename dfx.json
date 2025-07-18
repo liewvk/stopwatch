@@ -1,10 +1,11 @@
 {
+  "version": 1,
   "canisters": {
     "stopwatch_backend": {
       "type": "custom",
       "candid": "src/stopwatch_backend/stopwatch_backend.did",
       "wasm": ".kybra/stopwatch_backend/stopwatch_backend.wasm",
-      "build": "CANISTER_CANDID_PATH=src/stopwatch_backend/stopwatch_backend.did python -m kybra stopwatch_backend src/stopwatch_backend/src/main.py"
+      "build": "python3 -m kybra stopwatch_backend src/stopwatch_backend/src/main.py src/stopwatch_backend/stopwatch_backend.did"
     },
     "stopwatch_frontend": {
       "type": "assets",
@@ -21,8 +22,10 @@
   },
   "defaults": {
     "build": {
+      "output": "out"
+    },
+    "deploy": {
       "network": "local"
     }
-  },
-  "version": 1
-}
+  }
+}
